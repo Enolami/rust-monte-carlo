@@ -172,7 +172,7 @@ fn setup_callbacks(main_window: &AppWindow, app_state: Rc<RefCell<AppState>>) {
                 let model = mw.get_model_type();
 
                 let summary_csv = format!(
-                    "Metric,Value\nModel,{}\nExcetime,{}\nMean,{:.4}\nStdDev,{:.4}\nMedian,{:.4}\nP5,{:.4}\nP25,{:.4}\nP75,{:.4}\nP95,{:.4}\nVaR95,{:.4}\n",
+                    "Metric,Value\nModel,{}\nExcetime,{}\nMean,{:.4}\nStdDev,{:.4}\nMedian,{:.4}\nP5:{:.4}\nP25:{:.4}\nP75:{:.4}\nP95:{:.4}\nVaR95:{:.4}\n",
                     model, exec_time, stats.mean, stats.std_dev, stats.median, stats.p5, stats.p25, stats.p75, stats.p95, stats.var95
                 );
                 let file = FileDialog::new().add_filter("CSV", &["csv"]).set_file_name("simulation_summary.csv").save_file();

@@ -37,25 +37,18 @@ pub fn run_simulation (params: SimParams, hist_log_returns: Vec<f64>,) -> Result
     };
 
     let paths: Vec<Vec<f64>> = (0..num_paths).into_par_iter().map(|i| {
-        // For antithetic variates: pair paths (i, i+1) use the same seed
-        // Path i uses normal Z, path i+1 uses -Z
-        let base_seed = if params.use_antithetic {
-            (params.seed as u64).wrapping_add((i / 2) as u64)
-        } else {
-            (params.seed as u64).wrapping_add(i as u64)
-        };
-        let mut rng = StdRng::seed_from_u64(base_seed);
-        let is_antithetic = params.use_antithetic && (i % 2 == 1);
+        let seed = (params.seed as u64).wrapping_add(i as u64);
+        let mut rng = StdRng::seed_from_u64(seed);
 
         match params.model_type.as_str() {
-            "GBM" => generate_gbm_path(init_price,mu,sigma,horizon,dt,is_antithetic,&mut rng),
+            "GBM" => generate_gbm_path(init_price,mu,sigma,horizon,dt,params.use_antithetic && (i%2==1),&mut rng),
             "Bootstrap" => generate_bootstrap_path(init_price,horizon,&hist_log_returns, &mut rng),
             _ => Vec::new()
         }
     }).collect();
 
     let mut terminal_prices: Vec<f64> = paths.iter().map(|path| *path.last().unwrap()).collect();
-    let stats = calculate_statistics(&mut terminal_prices, init_price, model_name,num_paths, horizon)?;
+    let stats = calculate_statistics(&mut terminal_prices, model_name,num_paths, horizon)?;
 
     let paths_png = crate::plotting::plot_price_paths(&paths)?;
     let hist_png = crate::plotting::plot_histogram(&terminal_prices, 100)?;
@@ -106,7 +99,7 @@ fn generate_bootstrap_path(init_price: f64, steps: usize, log_returns: &[f64], r
 
 pub fn estimate_paramaters(log_returns: &[f64]) -> Result<(f64, f64)> {
     if log_returns.len() < 2 {
-        return Err(anyhow!("Not enough data to estimate parameters. Need at least 2 log returns."));
+        return Err(anyhow!("Not enough data to estimate parameters. Neet at least 2 log returns."));
     }
     let data = Data::new(log_returns.to_vec());
     let mu = data.mean().unwrap_or(0.0);
@@ -115,9 +108,9 @@ pub fn estimate_paramaters(log_returns: &[f64]) -> Result<(f64, f64)> {
     Ok((mu, sigma))
 }
 
-fn calculate_statistics(terminal_prices: &mut [f64], initial_price: f64, model: &str, paths: usize, horizon: usize) -> Result<SimStats> {
+fn calculate_statistics(terminal_prices: &mut [f64], model: &str, paths: usize, horizon: usize) -> Result<SimStats> {
     if terminal_prices.is_empty() {
-        return Err(anyhow!("No terminal prices to analyze"));
+        return Err(anyhow!("No terminal prcies to analyze"));
     }
 
     let mut data = Data::new(terminal_prices.to_vec());
@@ -131,11 +124,7 @@ fn calculate_statistics(terminal_prices: &mut [f64], initial_price: f64, model: 
     let p75 = ordered_data.percentile(75);
     let p95 = ordered_data.percentile(95);
 
-    // Calculate VaR95 from returns: negative of 5th percentile of total returns
-    let returns: Vec<f64> = terminal_prices.iter().map(|&tp| (tp - initial_price) / initial_price).collect();
-    let mut returns_data = Data::new(returns);
-    let p5_return = returns_data.percentile(5);
-    let var95 = -p5_return;
+    let var95 = -p5;
 
     Ok(SimStats { model: model.to_string(), paths, horizon, mean, std_dev, median, p5, p25, p75, p95, var95 })
 

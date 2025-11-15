@@ -89,18 +89,6 @@ pub fn plot_histogram(data: &[f64], num_bins: usize) -> Result<(Vec<u8>, u32, u3
             .max_by(|a, b| a.partial_cmp(b).unwrap())
             .unwrap();
 
-        let bin_width = (max_val - min_val) / num_bins as f64;
-        
-        // Calculate bin frequencies
-        let mut bins = vec![0; num_bins];
-        for &value in data.iter() {
-            let bin_idx = (((value - min_val) / bin_width) as usize).min(num_bins - 1);
-            bins[bin_idx] += 1;
-        }
-        
-        let max_freq = *bins.iter().max().unwrap_or(&1) as f64;
-        let y_max = (max_freq * 1.1).ceil(); // Add 10% padding
-
         let mut chart = ChartBuilder::on(&root)
             .caption(
                 "Terminal Price Distribution",
@@ -110,8 +98,8 @@ pub fn plot_histogram(data: &[f64], num_bins: usize) -> Result<(Vec<u8>, u32, u3
             .x_label_area_size(40)
             .y_label_area_size(60)
             .build_cartesian_2d(
-                (min_val..max_val).step(bin_width),
-                0.0..y_max, 
+                (min_val..max_val).step((max_val - min_val) / num_bins as f64),
+                0..1, 
             )?;
 
         let hist = Histogram::vertical(&chart)
