@@ -1,0 +1,206 @@
+import { Button, ComboBox, SpinBox, CheckBox, VerticalBox, HorizontalBox, GroupBox, GridBox, LineEdit } from "std-widgets.slint";
+
+export enum SimModel {
+    GBM,
+    Bootstrap,
+}
+
+export struct SimParams {
+    initial_price: float,
+    horizon: int,
+    num_paths: int,
+    mu: float,
+    sigma: float,
+    seed: int,
+    use_antithetic: bool,
+    dt: int,
+    model_type: string,
+}
+
+export struct SimStats {
+    mean: float,
+    std_dev: float,
+    median: float,
+    p5: float,
+    p25: float,
+    p75: float,
+    p95: float,
+    var95: float,
+}
+
+export component AppWindow inherits Window {
+    title: "Stock Monte Carlo Simulator";
+    width: 1050px;
+    height: 700px;
+
+    in-out property <[string]> ticker_list: [];
+    in-out property <string> selected_ticker : "";
+    in-out property <string> date_range: "Date range: N/A";
+    in-out property <string> record_count: "Record count: 0";
+
+    in-out property <float>  initial_price: 150.0;
+    in-out property <int> horizon: 30;
+    in-out property <int> num_paths: 1000;
+    in-out property <float> mu: 0.0002;
+    in-out property <float> sigma: 0.015;
+    in-out property <int> seed: 12345;
+    in-out property <bool> use_antithetic: true;
+    in-out property <string> model_type: "GBM";
+
+    in property <SimStats> stats;
+    in-out property <image> price_chart;
+    in-out property <image> hist_chart;
+    in-out property <string> exec_time: "0.0 ms";
+
+    callback load_csv_pressed();
+    callback select_ticker_changed();
+    callback estimate_params_pressed();
+    callback run_simulation_pressed(SimParams);
+    callback export_summary_pressed(); 
+    callback export_charts_pressed(); 
+
+    HorizontalBox {
+        padding: 10px;
+        spacing: 10px;
+
+        VerticalBox {
+            width: 300px;
+            GroupBox {
+                title: "Control Panel";
+                VerticalBox {
+                    spacing: 8px;
+                    Text { text: "1. Data Input"; }
+                    Button { text: "Load CSV"; clicked => { load_csv_pressed(); } }
+                    ComboBox { 
+                        model: root.ticker_list;
+                        selected(current-value) => {root.selected_ticker = current-value; select_ticker_changed();}
+                    }
+                    Text { text: root.date_range; }
+                    Text { text: root.record_count; }
+
+                    Text { text: "2. Parameter Estimation"; }
+                    Button {
+                        text: "Estimate μ/σ from Data";
+                        enabled: root.selected_ticker != "";
+                        clicked => { estimate_params_pressed(); }
+                    }
+
+                    Text { text: "3. Simulation Parameters"; }
+                    GridBox {
+                        Row { 
+                            Text { text: "Model:"; } 
+                            ComboBox {
+                                model: ["GBM", "Bootstrap"];
+                                selected => { root.model_type = self.current-value; }
+                            } 
+                        }
+                        Row { 
+                            Text { text: "Initial Price:"; }
+                            LineEdit { 
+                                text: root.initial_price;
+                                edited(text) => {root.initial_price = text.to-float();} 
+                            } 
+                        }
+                        Row { 
+                            Text { text: "Horizon (days):"; }
+                            SpinBox {
+                                value <=> root.horizon;
+                            }
+                        }
+                        Row { 
+                            Text { text: "Num Paths:"; }
+                            SpinBox {
+                                value <=> root.num_paths;
+                                maximum: 100000;
+                                step-size: 100;
+                            }
+                        }
+                        Row { 
+                            Text { text: "Drift (μ) daily:"; }
+                            LineEdit { 
+                                text : root.mu; 
+                                edited(text) => {root.mu = text.to-float();}
+                            } 
+                        }
+                        Row { 
+                            Text { text: "Volatility (σ) daily:"; }
+                            LineEdit { 
+                                text : root.sigma;
+                                edited(text) => {root.sigma = text.to-float();} 
+                            } 
+                        }
+                        Row { 
+                            Text { text: "Random Seed:"; }
+                            SpinBox {
+                                value <=> root.seed;
+                                maximum: 100000;
+                            }
+                        }
+                    }
+                    CheckBox {
+                        text: "Use Antithetic Variates";
+                        checked <=> root.use_antithetic;
+                    }
+
+                    Button {
+                        text: "RUN SIMULATION";
+                        primary: true;
+                        clicked => { run_simulation_pressed({
+                            initial_price: root.initial_price,
+                            horizon: root.horizon,
+                            num_paths: root.num_paths,
+                            mu: root.mu,
+                            sigma: root.sigma,
+                            seed: root.seed,
+                            use_antithetic: root.use_antithetic,
+                            dt: 1,
+                            model_type: root.model_type,
+                        }); }
+                    }
+                }
+            }
+        }
+
+        VerticalBox {
+            width: 475px;
+            GroupBox {
+                title: "Visual Output";
+                VerticalBox {
+                    spacing: 10px;
+                    Text { text: "Simulated Price Paths (50 Sample Scenarios)"; horizontal-alignment: center; }
+                    Image { source <=> root.price_chart; }
+                    Text { text: "Histogram of Terminal Prices"; horizontal-alignment: center; }
+                    Image { source <=> root.hist_chart; }
+                }
+            }
+        }
+
+        VerticalBox {
+            width: 250px;
+            GroupBox {
+                title: "Summary & Export";
+                VerticalBox {
+                    //spacing: 5px;
+                    Text { text: "Statistical Summary"; }
+                    GridBox {
+                        Row { Text { text: "Mean:"; } Text { text: "\{stats.mean}"; } }
+                        Row { Text { text: "Std Dev:"; } Text { text: "\{stats.std_dev}  "; } }
+                        Row { Text { text: "Median (P50):"; } Text { text: "\{stats.median} "; } }
+                        Row { Text { text: "P5:"; } Text { text: "\{stats.p5}  "; } }
+                        Row { Text { text: "P25:"; } Text { text: "\{stats.p25}  "; } }
+                        Row { Text { text: "P75:"; } Text { text: "\{stats.p75}  "; } }
+                        Row { Text { text: "P95:"; } Text { text: "\{stats.p95}  "; } }
+                        Row { Text { text: "VaR 95%:"; } Text { text: "\{stats.var95} "; } }
+                    }
+                    
+                    Text { text: "Performance: ";  }
+                    Text { text: "Execution time: " + root.exec_time; }
+
+                    Text { text: "Export Options";  }
+                    Button { text: "Save Summary (CSV)"; clicked => { export_summary_pressed(); } }
+                    Button { text: "Save Charts (PNG)"; clicked => { export_charts_pressed(); } }
+                }
+            }
+        }
+    }
+}
