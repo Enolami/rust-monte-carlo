@@ -30,24 +30,11 @@ where
     NaiveDate::parse_from_str(&s, "%Y%m%d").map_err(serde::de::Error::custom)
 }
 
-#[derive(Debug, Clone, Copy, Default)]
-pub struct EstimatedParams {
-    pub mu: f64,
-    pub sigma: f64,
-    pub last_price: f64,
-}
-
-#[derive(Debug, Clone)]
-pub struct TickerInfo{
-    pub date_range: String,
-    pub record_count: i64,
-    pub log_returns: Vec<f64>,
-    pub last_price: f64,
-}
-
 pub fn load_all_records(path: PathBuf) -> Result<(Vec<StockRecord>, Vec<String>)> {
     let mut reader = csv::Reader::from_path(path)?;
     let mut records = Vec::new();
+    //use BtreeMap instead of Hashmap for better:
+    //Sorted data, lower memory usage, O(logn) as avg,
     let mut tickers = BTreeMap::new();
 
     for result in reader.deserialize() {

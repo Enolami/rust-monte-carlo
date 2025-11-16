@@ -2,9 +2,11 @@ use anyhow::Result;
 use image::{ImageEncoder, codecs::png::PngEncoder};
 use rfd::FileDialog;
 use slint::{Image, ModelRc, PlatformError, SharedString, VecModel};
-use std::{cell::RefCell, fs::{self, File}, rc::Rc, sync::{Arc, Mutex}, time::Instant};
+use std::{cell::RefCell, fs::{self, File}, rc::Rc, thread, time::Instant};
 
-use crate::{core_sim::{estimate_paramaters, run_simulation}, data_io::{EstimatedParams, get_ticker_info, load_all_records}};
+use crate::core_sim::{SimStats as rustSimStats, estimate_paramaters, run_simulation};
+use crate::data_io::{get_ticker_info, load_all_records}; 
+use crate::slint_generatedAppWindow::SimStats as slintSimStats;
 
 
 slint::include_modules!();
@@ -35,6 +37,7 @@ fn main() -> Result<(), PlatformError> {
 fn setup_callbacks(main_window: &AppWindow, app_state: Rc<RefCell<AppState>>) {
     let main_window_weak = main_window.as_weak();
 
+    //Read csv file
     main_window.on_load_csv_pressed({
         let mw_weak = main_window_weak.clone();
         let app_state = app_state.clone();
@@ -61,6 +64,7 @@ fn setup_callbacks(main_window: &AppWindow, app_state: Rc<RefCell<AppState>>) {
         }
     });
 
+    //read selected ticker
     main_window.on_select_ticker_changed({
         let mw_weak = main_window_weak.clone();
         let app_state = app_state.clone();
@@ -89,6 +93,7 @@ fn setup_callbacks(main_window: &AppWindow, app_state: Rc<RefCell<AppState>>) {
         }
     });
 
+    //calculate sigma and mu from last log returns
     main_window.on_estimate_params_pressed({
         let mw_weak = main_window_weak.clone();
         let app_state = app_state.clone();
@@ -114,6 +119,7 @@ fn setup_callbacks(main_window: &AppWindow, app_state: Rc<RefCell<AppState>>) {
         }
     });
 
+    //run sim and display png
     main_window.on_run_simulation_pressed({
         let mw_weak = main_window_weak.clone();
         let app_state = app_state.clone();
@@ -132,7 +138,7 @@ fn setup_callbacks(main_window: &AppWindow, app_state: Rc<RefCell<AppState>>) {
                         let duration = start_time.elapsed().as_millis();
                         mw.set_exec_time(format!("{} ms", duration).into());
 
-                        let ui_stats = SimStats {
+                        let ui_stats = slintSimStats{
                             mean: stats.mean as f32,
                             std_dev: stats.std_dev as f32,
                             median: stats.median as f32,
@@ -162,33 +168,62 @@ fn setup_callbacks(main_window: &AppWindow, app_state: Rc<RefCell<AppState>>) {
         }
     });
 
+    //save summary.csv file
     main_window.on_export_summary_pressed({
         let mw_weak = main_window_weak.clone();
-        let app_state = app_state.clone();
         move || {
             if let Some(mw) = mw_weak.upgrade() {
                 let stats = mw.get_stats();
                 let exec_time = mw.get_exec_time();
-                let model = mw.get_model_type();
+                let mw_weak_clone = mw.as_weak();
 
-                let summary_csv = format!(
-                    "Metric,Value\nModel,{}\nExcetime,{}\nMean,{:.4}\nStdDev,{:.4}\nMedian,{:.4}\nP5:{:.4}\nP25:{:.4}\nP75:{:.4}\nP95:{:.4}\nVaR95:{:.4}\n",
-                    model, exec_time, stats.mean, stats.std_dev, stats.median, stats.p5, stats.p25, stats.p75, stats.p95, stats.var95
-                );
-                let file = FileDialog::new().add_filter("CSV", &["csv"]).set_file_name("simulation_summary.csv").save_file();
+                let horizons = mw.get_horizon();
+                let num_paths = mw.get_num_paths();
+                let model = mw.get_model_type().to_string();
 
-                if let Some(path) = file {
-                    match fs::write(path, summary_csv) {
-                        Ok(_) => {}
-                        Err(e) => {
-                            eprintln!("Error saving summary: {}", e)
+                let full_stats = rustSimStats {
+                    horizon: horizons as usize,
+                    paths: num_paths as usize,
+                    model: model,
+                    mean: stats.mean as f64,
+                    std_dev: stats.std_dev as f64,
+                    median: stats.median as f64,
+                    p5: stats.p5 as f64,
+                    p25: stats.p25 as f64,
+                    p75: stats.p75 as f64,
+                    p95: stats.p95 as f64,
+                    var95: stats.var95 as f64,
+                };
+
+                //avoid freeze
+                thread::spawn(move || {
+                    let summary_csv = format!(
+                        "Metric,Value\nExecTime,{}\nModel,{}\nHorizon,{}\nPaths,{}\nMean,{:.4}\nStdDev,{:.4}\nMedian,{:.4}\nP5,{:.4}\nP25,{:.4}\nP75,{:.4}\nP95,{:.4}\nVaR95,{:.4}\n",
+                        exec_time, full_stats.model, full_stats.horizon, full_stats.paths, full_stats.mean, full_stats.std_dev, full_stats.median, full_stats.p5, full_stats.p25, full_stats.p75, full_stats.p95, full_stats.var95
+                    );
+                    
+                    let file = FileDialog::new()
+                        .add_filter("CSV", &["csv"])
+                        .set_file_name("simulation_summary.csv")
+                        .save_file();
+
+                    if let Some(path) = file {
+                        match fs::write(path, summary_csv) {
+                            Ok(_) => {}
+                            Err(e) => {eprintln!("Error save summary file: {}", e)}
                         }
                     }
-                }  
+
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(mw) = mw_weak_clone.upgrade() {
+                        }
+                    });
+                });
             }
         }
     });
 
+    //save png files
     main_window.on_export_charts_pressed({
         let mw_weak = main_window_weak.clone();
         let app_state = app_state.clone();
@@ -225,6 +260,7 @@ fn setup_callbacks(main_window: &AppWindow, app_state: Rc<RefCell<AppState>>) {
     });
 }
 
+//encode from rgb<u8> to png
 fn encode_and_save_png(path: &std::path::Path, buf: &[u8], width: u32, height: u32) -> Result<()> {
     let file = File::create(path)?;
     let encoder = PngEncoder::new(file);

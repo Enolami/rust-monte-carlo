@@ -1,5 +1,4 @@
-import { Button, ComboBox, SpinBox, CheckBox, VerticalBox, HorizontalBox, GroupBox, GridBox, LineEdit } from "std-widgets.slint";
-
+import { Button, ComboBox, SpinBox, CheckBox, VerticalBox, HorizontalBox, GroupBox, GridBox, LineEdit, TabWidget } from "std-widgets.slint";
 export enum SimModel {
     GBM,
     Bootstrap,
@@ -30,9 +29,10 @@ export struct SimStats {
 
 export component AppWindow inherits Window {
     title: "Stock Monte Carlo Simulator";
-    width: 1050px;
-    height: 700px;
-
+    preferred-width: 1050px;
+    preferred-height: 700px;
+    min-width: 960px;
+    min-height: 600px;
     in-out property <[string]> ticker_list: [];
     in-out property <string> selected_ticker : "";
     in-out property <string> date_range: "Date range: N/A";
@@ -56,59 +56,63 @@ export component AppWindow inherits Window {
     callback select_ticker_changed();
     callback estimate_params_pressed();
     callback run_simulation_pressed(SimParams);
-    callback export_summary_pressed(); 
+    callback export_summary_pressed();
     callback export_charts_pressed(); 
 
     HorizontalBox {
         padding: 10px;
         spacing: 10px;
-
-        VerticalBox {
-            width: 300px;
+        VerticalBox { // Left Panel
+            preferred-width: 300px;
+            min-width: 280px;
+            vertical-stretch: 1; 
             GroupBox {
                 title: "Control Panel";
+                vertical-stretch: 1; 
                 VerticalBox {
                     spacing: 8px;
                     Text { text: "1. Data Input"; }
-                    Button { text: "Load CSV"; clicked => { load_csv_pressed(); } }
+                    Button {
+                        text: "Load CSV";
+                        clicked => { load_csv_pressed(); } 
+                    }
                     ComboBox { 
                         model: root.ticker_list;
                         selected(current-value) => {root.selected_ticker = current-value; select_ticker_changed();}
                     }
-                    Text { text: root.date_range; }
-                    Text { text: root.record_count; }
+                    Text { text: root.date_range;}
+                    Text { text: root.record_count;}
 
-                    Text { text: "2. Parameter Estimation"; }
+                    Text { text: "2. Parameter Estimation";}
                     Button {
                         text: "Estimate μ/σ from Data";
                         enabled: root.selected_ticker != "";
                         clicked => { estimate_params_pressed(); }
                     }
 
-                    Text { text: "3. Simulation Parameters"; }
+                    Text { text: "3. Simulation Parameters";}
                     GridBox {
                         Row { 
-                            Text { text: "Model:"; } 
+                            Text { text: "Model:";} 
                             ComboBox {
                                 model: ["GBM", "Bootstrap"];
                                 selected => { root.model_type = self.current-value; }
                             } 
                         }
                         Row { 
-                            Text { text: "Initial Price:"; }
+                            Text { text: "Initial Price:";}
                             LineEdit { 
                                 text: root.initial_price;
                                 edited(text) => {root.initial_price = text.to-float();} 
                             } 
                         }
-                        Row { 
-                            Text { text: "Horizon (days):"; }
+                        Row {                
+                            Text { text: "Horizon (days):";}
                             SpinBox {
-                                value <=> root.horizon;
-                            }
+                                value <=> root.horizon;}
                         }
                         Row { 
-                            Text { text: "Num Paths:"; }
+                            Text { text: "Num Paths:";}
                             SpinBox {
                                 value <=> root.num_paths;
                                 maximum: 100000;
@@ -116,21 +120,21 @@ export component AppWindow inherits Window {
                             }
                         }
                         Row { 
-                            Text { text: "Drift (μ) daily:"; }
+                            Text { text: "Drift (μ) daily:";}
                             LineEdit { 
-                                text : root.mu; 
+                                text : root.mu;
                                 edited(text) => {root.mu = text.to-float();}
                             } 
                         }
-                        Row { 
-                            Text { text: "Volatility (σ) daily:"; }
+                        Row {                  
+                            Text { text: "Volatility (σ) daily:";}
                             LineEdit { 
                                 text : root.sigma;
                                 edited(text) => {root.sigma = text.to-float();} 
                             } 
                         }
-                        Row { 
-                            Text { text: "Random Seed:"; }
+                        Row {                 
+                            Text { text: "Random Seed:";}
                             SpinBox {
                                 value <=> root.seed;
                                 maximum: 100000;
@@ -141,7 +145,6 @@ export component AppWindow inherits Window {
                         text: "Use Antithetic Variates";
                         checked <=> root.use_antithetic;
                     }
-
                     Button {
                         text: "RUN SIMULATION";
                         primary: true;
@@ -155,50 +158,107 @@ export component AppWindow inherits Window {
                             use_antithetic: root.use_antithetic,
                             dt: 1,
                             model_type: root.model_type,
-                        }); }
+                        });
+                        }
                     }
                 }
             }
         }
 
-        VerticalBox {
-            width: 475px;
+        VerticalBox { // Middle Panel
+            min-width: 400px;
+            horizontal-stretch: 1;
+            vertical-stretch: 1;
             GroupBox {
                 title: "Visual Output";
-                VerticalBox {
-                    spacing: 10px;
-                    Text { text: "Simulated Price Paths (50 Sample Scenarios)"; horizontal-alignment: center; }
-                    Image { source <=> root.price_chart; }
-                    Text { text: "Histogram of Terminal Prices"; horizontal-alignment: center; }
-                    Image { source <=> root.hist_chart; }
+                vertical-stretch: 1;
+                TabWidget { 
+                    vertical-stretch: 1;
+                    Tab {
+                        title: "Price Paths";
+                        VerticalBox {
+                            spacing: 10px;
+                            padding: 5px;
+                            Text { text: "Simulated Price Paths (50 Sample Scenarios)"; horizontal-alignment: center; }
+                            Image { 
+                                source <=> root.price_chart;
+                                image-fit: fill;
+                                vertical-stretch: 1;
+                            }
+                        }
+                    }
+                    Tab {
+                        title: "Histogram";
+                        VerticalBox {
+                            spacing: 10px;
+                            padding: 5px;
+                            Text { text: "Histogram of Terminal Prices"; horizontal-alignment: center; }
+                            Image { 
+                                source <=> root.hist_chart;
+                                image-fit: fill;
+                                vertical-stretch: 1;
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        VerticalBox {
-            width: 250px;
+        VerticalBox { // Right Panel
+            preferred-width: 250px;
+            min-width: 240px;
+            vertical-stretch: 1;
             GroupBox {
                 title: "Summary & Export";
+                vertical-stretch: 1; 
                 VerticalBox {
-                    //spacing: 5px;
                     Text { text: "Statistical Summary"; }
                     GridBox {
-                        Row { Text { text: "Mean:"; } Text { text: "\{stats.mean}"; } }
-                        Row { Text { text: "Std Dev:"; } Text { text: "\{stats.std_dev}  "; } }
-                        Row { Text { text: "Median (P50):"; } Text { text: "\{stats.median} "; } }
-                        Row { Text { text: "P5:"; } Text { text: "\{stats.p5}  "; } }
-                        Row { Text { text: "P25:"; } Text { text: "\{stats.p25}  "; } }
-                        Row { Text { text: "P75:"; } Text { text: "\{stats.p75}  "; } }
-                        Row { Text { text: "P95:"; } Text { text: "\{stats.p95}  "; } }
-                        Row { Text { text: "VaR 95%:"; } Text { text: "\{stats.var95} "; } }
+                        Row { 
+                            Text { text: "Mean:";} 
+                            Text { text: "\{stats.mean}"; } 
+                        }
+                        Row { 
+                            Text { text: "Std Dev:";} 
+                            Text { text: "\{stats.std_dev}  "; } 
+                        }
+                        Row { 
+                            Text { text: "Median (P50):";} 
+                            Text { text: "\{stats.median} "; } 
+                        }
+                        Row { 
+                            Text { text: "P5:";} 
+                            Text { text: "\{stats.p5}  "; } 
+                        }
+                        Row { 
+                            Text { text: "P25:";} 
+                            Text { text: "\{stats.p25}  "; } 
+                        }
+                        Row { 
+                            Text { text: "P75:";} 
+                            Text { text: "\{stats.p75}  "; } 
+                        }
+                        Row { 
+                            Text { text: "P95:";} 
+                            Text { text: "\{stats.p95}  "; } 
+                        }
+                        Row { 
+                            Text { text: "VaR 95%:";} 
+                            Text { text: "\{stats.var95} "; } 
+                        }
                     }
                     
-                    Text { text: "Performance: ";  }
-                    Text { text: "Execution time: " + root.exec_time; }
-
-                    Text { text: "Export Options";  }
-                    Button { text: "Save Summary (CSV)"; clicked => { export_summary_pressed(); } }
-                    Button { text: "Save Charts (PNG)"; clicked => { export_charts_pressed(); } }
+                    Text { text: "Performance: ";}
+                    Text { text: "Execution time: " + root.exec_time;}
+                    Text { text: "Export Options";}
+                    Button { 
+                        text: "Save Summary (CSV)";
+                        clicked => { export_summary_pressed(); } 
+                    }
+                    Button { 
+                        text: "Save Charts (PNG)";
+                        clicked => { export_charts_pressed(); } 
+                    }
                 }
             }
         }

@@ -1,10 +1,8 @@
 use anyhow::{Ok, Result, anyhow};
 use rand::{rngs::StdRng, Rng, SeedableRng};
-use rand_distr::{Distribution, Normal, num_traits::{Float, SaturatingMul}};
+use rand_distr::{Distribution, Normal};
 use rayon::prelude::*;
-use slint::SharedString;
 use statrs::statistics::{Data, Distribution as StatDist, Median, OrderStatistics};
-use std::{fmt, path};
 
 use crate::SimParams;
 
@@ -48,7 +46,7 @@ pub fn run_simulation (params: SimParams, hist_log_returns: Vec<f64>,) -> Result
     }).collect();
 
     let mut terminal_prices: Vec<f64> = paths.iter().map(|path| *path.last().unwrap()).collect();
-    let stats = calculate_statistics(&mut terminal_prices, model_name,num_paths, horizon)?;
+    let stats = calculate_statistics(&mut terminal_prices, model_name,num_paths, horizon, init_price)?;
 
     let paths_png = crate::plotting::plot_price_paths(&paths)?;
     let hist_png = crate::plotting::plot_histogram(&terminal_prices, 100)?;
@@ -57,6 +55,7 @@ pub fn run_simulation (params: SimParams, hist_log_returns: Vec<f64>,) -> Result
 }
 
 fn generate_gbm_path(init_price: f64, mu: f64, sigma: f64, steps: usize, dt: f64, is_antithetic: bool, rng: &mut StdRng,) -> Vec<f64> {
+    //plus 1 for init_price
     let mut path = Vec::with_capacity(steps+1);
     path.push(init_price);
     let mut current_price = init_price;
@@ -108,12 +107,12 @@ pub fn estimate_paramaters(log_returns: &[f64]) -> Result<(f64, f64)> {
     Ok((mu, sigma))
 }
 
-fn calculate_statistics(terminal_prices: &mut [f64], model: &str, paths: usize, horizon: usize) -> Result<SimStats> {
+fn calculate_statistics(terminal_prices: &mut [f64], model: &str, paths: usize, horizon: usize, init_price: f64) -> Result<SimStats> {
     if terminal_prices.is_empty() {
         return Err(anyhow!("No terminal prcies to analyze"));
     }
 
-    let mut data = Data::new(terminal_prices.to_vec());
+    let data = Data::new(terminal_prices.to_vec());
     let mean = data.mean().unwrap_or(0.0);
     let std_dev = data.std_dev().unwrap_or(0.0);
     let median = data.median();
@@ -124,7 +123,13 @@ fn calculate_statistics(terminal_prices: &mut [f64], model: &str, paths: usize, 
     let p75 = ordered_data.percentile(75);
     let p95 = ordered_data.percentile(95);
 
-    let var95 = -p5;
+    let returns: Vec<f64> = terminal_prices.iter()
+        .map(|&price| (price - init_price) / init_price)
+        .collect();
+    
+    let mut returns_data = Data::new(returns);
+    let p5_return = returns_data.percentile(5);
+    let var95 = -p5_return;
 
     Ok(SimStats { model: model.to_string(), paths, horizon, mean, std_dev, median, p5, p25, p75, p95, var95 })
 
