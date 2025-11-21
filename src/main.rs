@@ -13,6 +13,7 @@ slint::include_modules!();
 mod data_io;
 mod core_sim;
 mod plotting;
+mod config;
 
 #[derive(Default, Debug, Clone)]
 struct AppState {
@@ -57,7 +58,7 @@ fn setup_callbacks(main_window: &AppWindow, app_state: Rc<RefCell<AppState>>) {
                         }
                     }
                     Err(e) => {
-                        eprintln!("Failed to load CSV {:?}",e);
+                        eprintln!("Failed to load CSV {:?} - main.rs:61",e);
                     }
                 }
             }
@@ -112,7 +113,7 @@ fn setup_callbacks(main_window: &AppWindow, app_state: Rc<RefCell<AppState>>) {
                         mw.set_initial_price(state.selected_ticker_last_price as f32);
                     }
                     Err(e) => {
-                        eprintln!("Error estimating: {}", e);
+                        eprintln!("Error estimating: {} - main.rs:116", e);
                     }
                 }
             }
@@ -161,7 +162,7 @@ fn setup_callbacks(main_window: &AppWindow, app_state: Rc<RefCell<AppState>>) {
                         state.last_hist_chart_png_raw = (hist_buf, hist_w, hist_h);
                     }
                     Err(e) => {
-                        eprintln!("Simulation error: {}", e);
+                        eprintln!("Simulation error: {} - main.rs:165", e);
                     }
                 }
             }
@@ -210,7 +211,7 @@ fn setup_callbacks(main_window: &AppWindow, app_state: Rc<RefCell<AppState>>) {
                     if let Some(path) = file {
                         match fs::write(path, summary_csv) {
                             Ok(_) => {}
-                            Err(e) => {eprintln!("Error save summary file: {}", e)}
+                            Err(e) => {eprintln!("Error save summary file: {} - main.rs:214", e)}
                         }
                     }
 
@@ -251,14 +252,140 @@ fn setup_callbacks(main_window: &AppWindow, app_state: Rc<RefCell<AppState>>) {
 
                     match (p_res, h_res) {
                         (Ok(_), Ok(_)) => {}
-                        (Err(e), _) | (_, Err(e)) => {eprintln!("Error saving charts: {}", e);}
+                        (Err(e), _) | (_, Err(e)) => {eprintln!("Error saving charts: {} - main.rs:255", e);}
                     }
                     
                 }
             }
         }
     });
+
+    //save setup to JSON file
+    main_window.on_save_setup_pressed({
+        let mw_weak = main_window_weak.clone();
+        move || {
+            if let Some(mw) = mw_weak.upgrade() {
+            // Gather all current parameters from GUI
+                let config = crate::config::SimConfig {
+                    initial_price: mw.get_initial_price() as f64,
+                    horizon: mw.get_horizon() as usize,
+                    num_paths: mw.get_num_paths() as usize,
+                    seed: mw.get_seed() as u64,
+                    use_antithetic: mw.get_use_antithetic(),
+                    dt: 1.0,
+                    model_type: mw.get_model_type().to_string(),
+                    gbm_params: if mw.get_model_type() == "GBM" || mw.get_model_type() == "JumpDiffusion" {
+                    Some(crate::config::GBMParams {
+                        mu: mw.get_mu() as f64,
+                        sigma: mw.get_sigma() as f64,
+                    })
+                } else {
+                    None
+                },
+                mean_reversion_params: if mw.get_model_type() == "MeanReversion" {
+                    Some(crate::config::MeanReversionParams {
+                        theta: mw.get_theta() as f64,
+                        mu_long_term: mw.get_mu_long_term() as f64,
+                        sigma: mw.get_sigma() as f64,
+                    })
+                } else {
+                    None
+                },
+                jump_diffusion_params: if mw.get_model_type() == "JumpDiffusion" {
+                    Some(crate::config::JumpDiffusionParams {
+                        mu: mw.get_mu() as f64,          
+                        sigma: mw.get_sigma() as f64,
+                        lambda: mw.get_lambda() as f64,
+                        mu_j: mw.get_mu_j() as f64,
+                        sigma_j: mw.get_sigma_j() as f64,
+                    })
+                } else {
+                    None
+                },
+                garch_params: if mw.get_model_type() == "GARCH" {
+                    Some(crate::config::GARCHParams {
+                        omega: mw.get_omega() as f64,
+                        alpha: mw.get_alpha() as f64,
+                        beta: mw.get_beta() as f64,
+                    })
+                } else {
+                    None
+                },
+            };
+
+            // Open file dialog to save
+            if let Some(path) = FileDialog::new()
+                .add_filter("JSON", &["json"])
+                .set_file_name("simulation_config.json")
+                .save_file()
+            {
+                match crate::config::save_config(&config, &path) {
+                    Ok(_) => println!("✅ Configuration saved to {:?} - main.rs:323", path),
+                    Err(e) => eprintln!("❌ Error saving config: {} - main.rs:324", e),
+                }
+            }
+        }
+    }
+});
+ //load setup from JSON file
+    main_window.on_load_setup_pressed({
+        let mw_weak = main_window_weak.clone();
+            move || {
+                if let Some(mw) = mw_weak.upgrade() {
+                     // Open file dialog to load
+                    if let Some(path) = FileDialog::new()
+                        .add_filter("JSON", &["json"])
+                        .pick_file()
+                {
+                    match crate::config::load_config(&path) {
+                        Ok(config) => {
+                        // Apply loaded config to GUI
+                            mw.set_initial_price(config.initial_price as f32);
+                            mw.set_horizon(config.horizon as i32);
+                            mw.set_num_paths(config.num_paths as i32);
+                            mw.set_seed(config.seed as i32);
+                            mw.set_use_antithetic(config.use_antithetic);
+                            mw.set_model_type(config.model_type.clone().into());
+
+                        // Load model-specific parameters
+                        if let Some(gbm) = config.gbm_params {
+                            mw.set_mu(gbm.mu as f32);
+                            mw.set_sigma(gbm.sigma as f32);
+                        }
+
+                        if let Some(mr) = config.mean_reversion_params {
+                            mw.set_theta(mr.theta as f32);
+                            mw.set_mu_long_term(mr.mu_long_term as f32);
+                            mw.set_sigma(mr.sigma as f32);
+                        }
+
+                        if let Some(jd) = config.jump_diffusion_params {
+                            mw.set_mu(jd.mu as f32);
+                            mw.set_sigma(jd.sigma as f32);
+                            mw.set_lambda(jd.lambda as f32);
+                            mw.set_mu_j(jd.mu_j as f32);
+                            mw.set_sigma_j(jd.sigma_j as f32);
+                        }
+
+                        if let Some(garch) = config.garch_params {
+                            mw.set_omega(garch.omega as f32);
+                            mw.set_alpha(garch.alpha as f32);
+                            mw.set_beta(garch.beta as f32);
+                        }
+
+                        println!("✅ Configuration loaded from {:?} - main.rs:376", path);
+                    }
+                    Err(e) => {
+                        eprintln!("❌ Error loading config: {} - main.rs:379", e);
+                    }
+                }
+            }
+        }
+    }
+});
 }
+
+
 
 //encode from rgb<u8> to png
 fn encode_and_save_png(path: &std::path::Path, buf: &[u8], width: u32, height: u32) -> Result<()> {

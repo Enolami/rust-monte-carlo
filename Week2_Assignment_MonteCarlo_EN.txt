@@ -1,0 +1,93 @@
+
+# Week 2 – Assignment: Monte Carlo Stock Price Simulator (Rust + Slint)
+
+## 1) Learning Objectives
+- Understand and implement Monte Carlo simulation for stock prices.
+- Practice Rust (project structure, modules, tests) and Slint for GUI development.
+- Process historical stock price data (CSV), compute log-returns, estimate drift (μ) and volatility (σ), and convert between daily/annualized parameters.
+- Visualize results (price paths chart, histogram of terminal prices) and compute statistical metrics (mean, stdev, percentiles, VaR).
+
+## 2) Functional Requirements
+1. **Data Input**
+   - Load CSV containing historical prices (`Ticker, Date, Open, High, Low, Close, Volume`).
+   - Choose Ticker user want to check
+   - Display basic information (ticker, date range, record count).
+   - Compute log-returns: r_t = ln(Close_t / Close_{t-1}).
+
+2. **Parameter Estimation**
+   - Estimate daily μ (mean) and σ (std) from log-returns.
+
+3. **Simulation Models**
+   - **GBM (Geometric Brownian Motion)**: S_{t+Δ} = S_t * exp((μ - 0.5σ²)Δ + σ√ΔZ).
+   - **Historical Bootstrap**: resample historical log-returns randomly to generate price paths.
+
+4. **Simulation Parameters (User Inputs via Slint)**
+   - Initial Price (default: last Close)
+   - Horizon (days)
+   - Number of Paths
+   - Δ (dt)
+   - Drift (μ), Volatility (σ)
+   - Random Seed
+   - Antithetic Variates (on/off)
+
+5. **Results Display**
+   - Line chart for sample paths (20–50).
+   - Histogram for terminal prices or log-returns.
+   - Summary table: mean, std, median, P5, P25, P75, P95, VaR95.
+   - Display execution time (ms).
+
+6. **Export Options**
+   - Export simulation summary to CSV.
+   - Export charts to PNG.
+
+## 3) UI Requirements (Slint)
+- **Panels:** Data (Load CSV) and choose Ticker, Config (Parameters), Results (Charts & Summary).
+- Buttons: Load CSV, Estimate μ/σ, Run Simulation.
+- Use `plotters` crate to render PNG charts and show via Slint `Image`.
+
+## 4) Architecture
+- Rust Workspace with crates:
+  - `core_sim`: simulation logic (GBM, bootstrap)
+  - `app_gui`: Slint front-end
+  - `data_io`: CSV loader, parameter estimation
+- Suggested crates: `rand`, `rand_distr`, `csv`, `serde`, `plotters`, `chrono`, `rayon`, `anyhow`, `slint`.
+- Unit tests for reproducibility (same seed → same results).
+
+## 5) Monte Carlo Refresher
+- Log-return: r_t = ln(S_t / S_{t-1})
+- Estimation: μ = mean(r_t), σ = std(r_t)
+- GBM: dS_t = μS_t dt + σS_t dW_t
+- Closed form: S_{t+Δ} = S_t * exp((μ − 0.5σ²)Δ + σ√ΔZ)
+- Historical Bootstrap: randomly sample from past returns.
+- Antithetic Variates: pair each Z with −Z to reduce variance.
+- VaR95: negative of 5th percentile of total returns.
+
+## 6) Suggested Readings
+- Monte Carlo methods in finance.
+- Geometric Brownian Motion and log-normal returns.
+- VaR (Value-at-Risk) concepts.
+- Variance reduction techniques.
+
+Expected Outcome: A Rust + Slint app capable of loading data, estimating parameters, simulating GBM or bootstrap paths, visualizing results, and exporting data.
+
+
+
+
+
+
+
+
+
+
+AAA
+AAM
+AAT
+ABR
+ABS
+ABT
+ACB
+ACC
+ACG
+ACL
+
+

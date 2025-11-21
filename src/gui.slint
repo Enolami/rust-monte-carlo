@@ -1,4 +1,4 @@
-import { Button, ComboBox, SpinBox, CheckBox, VerticalBox, HorizontalBox, GroupBox, GridBox, LineEdit, TabWidget } from "std-widgets.slint";
+import { Button, ComboBox, SpinBox, CheckBox, VerticalBox, HorizontalBox, GroupBox, GridBox, LineEdit, TabWidget, ScrollView } from "std-widgets.slint";
 export enum SimModel {
     GBM,
     Bootstrap,
@@ -14,6 +14,17 @@ export struct SimParams {
     use_antithetic: bool,
     dt: int,
     model_type: string,
+    // Mean Reversion
+    theta: float,
+    mu_long_term: float,
+    // Jump Diffusion
+    lambda: float,
+    mu_j: float,
+    sigma_j: float,
+    // GARCH
+    omega: float,
+    alpha: float,
+    beta: float,
 }
 
 export struct SimStats {
@@ -47,6 +58,20 @@ export component AppWindow inherits Window {
     in-out property <bool> use_antithetic: true;
     in-out property <string> model_type: "GBM";
 
+    // Mean Reversion parameters
+    in-out property <float> theta: 0.1;
+    in-out property <float> mu_long_term: 100.0;
+
+    // Jump Diffusion parameters
+    in-out property <float> lambda: 2.0;
+    in-out property <float> mu_j: -0.02;
+    in-out property <float> sigma_j: 0.05;
+
+    // GARCH parameters
+    in-out property <float> omega: 0.00001;
+    in-out property <float> alpha: 0.1;
+    in-out property <float> beta: 0.85;
+
     in property <SimStats> stats;
     in-out property <image> price_chart;
     in-out property <image> hist_chart;
@@ -57,7 +82,9 @@ export component AppWindow inherits Window {
     callback estimate_params_pressed();
     callback run_simulation_pressed(SimParams);
     callback export_summary_pressed();
-    callback export_charts_pressed(); 
+    callback export_charts_pressed();
+    callback save_setup_pressed();
+    callback load_setup_pressed(); 
 
     HorizontalBox {
         padding: 10px;
@@ -69,6 +96,7 @@ export component AppWindow inherits Window {
             GroupBox {
                 title: "Control Panel";
                 vertical-stretch: 1; 
+                  
                 VerticalBox {
                     spacing: 8px;
                     Text { text: "1. Data Input"; }
@@ -89,13 +117,24 @@ export component AppWindow inherits Window {
                         enabled: root.selected_ticker != "";
                         clicked => { estimate_params_pressed(); }
                     }
-
-                    Text { text: "3. Simulation Parameters";}
+                    Text { text: "3. Save/Load Setup";}
+                    HorizontalBox {
+                        spacing: 5px;
+                    Button {
+                        text: "💾 Save Setup";
+                        clicked => { save_setup_pressed(); }
+                     }
+                    Button {
+                        text: "📂 Load Setup";
+                        clicked => { load_setup_pressed(); }
+                     }
+                    }
+                    Text { text: "4. Simulation Parameters";}
                     GridBox {
                         Row { 
                             Text { text: "Model:";} 
                             ComboBox {
-                                model: ["GBM", "Bootstrap"];
+                                model: ["GBM", "Bootstrap", "MeanReversion", "JumpDiffusion", "GARCH"];
                                 selected => { root.model_type = self.current-value; }
                             } 
                         }
@@ -119,25 +158,130 @@ export component AppWindow inherits Window {
                                 step-size: 100;
                             }
                         }
-                        Row { 
-                            Text { text: "Drift (μ) daily:";}
-                            LineEdit { 
-                                text : root.mu;
-                                edited(text) => {root.mu = text.to-float();}
-                            } 
-                        }
-                        Row {                  
-                            Text { text: "Volatility (σ) daily:";}
-                            LineEdit { 
-                                text : root.sigma;
-                                edited(text) => {root.sigma = text.to-float();} 
-                            } 
-                        }
                         Row {                 
                             Text { text: "Random Seed:";}
                             SpinBox {
                                 value <=> root.seed;
                                 maximum: 100000;
+                            }
+                        }
+                    }
+                    ScrollView {
+                        max-height: 300px;  
+                        VerticalBox {
+                            spacing: 5px;
+                            // Model-specific parameters
+                            if root.model_type == "GBM" || root.model_type == "JumpDiffusion": VerticalBox {
+                                spacing: 5px;
+                                Text { text: "GBM Parameters:"; font-weight: 600; }
+                                GridBox {
+                                    Row { 
+                                        Text { text: "Drift (μ) daily:"; }
+                                        LineEdit { 
+                                            text: root.mu;
+                                            edited(text) => { root.mu = text.to-float(); }
+                                        } 
+                                    }
+                                    Row { 
+                                        Text { text: "Volatility (σ) daily:"; }
+                                        LineEdit { 
+                                            text: root.sigma;
+                                            edited(text) => { root.sigma = text.to-float(); }
+                                        } 
+                                    }
+                                }
+                            }
+                    
+                            // Jump Diffusion specific parameters
+                            if root.model_type == "JumpDiffusion": VerticalBox {
+                                spacing: 5px;
+                                Text { text: "Jump Parameters:"; font-weight: 600; }
+                                GridBox {
+                                    Row { 
+                                        Text { text: "Jump Intensity (λ):"; }
+                                        LineEdit { 
+                                            text: root.lambda;
+                                            edited(text) => { root.lambda = text.to-float(); }
+                                        } 
+                                    }
+                                    Row { 
+                                        Text { text: "Jump Mean (μ_j):"; }
+                                        LineEdit { 
+                                            text: root.mu_j;
+                                            edited(text) => { root.mu_j = text.to-float(); }
+                                        } 
+                                    }
+                                    Row { 
+                                        Text { text: "Jump Std (σ_j):"; }
+                                        LineEdit { 
+                                            text: root.sigma_j;
+                                            edited(text) => { root.sigma_j = text.to-float(); }
+                                        } 
+                                    }
+                                }
+                            }
+                    
+                            // Mean Reversion parameters
+                            if root.model_type == "MeanReversion": VerticalBox {
+                                spacing: 5px;
+                                Text { text: "Mean Reversion Parameters:"; font-weight: 600; }
+                                GridBox {
+                                    Row { 
+                                        Text { text: "Speed (θ):"; }
+                                        LineEdit { 
+                                            text: root.theta;
+                                            edited(text) => { root.theta = text.to-float(); }
+                                        } 
+                                    }
+                                    Row { 
+                                        Text { text: "Long-term Mean (μ):"; }
+                                        LineEdit { 
+                                            text: root.mu_long_term;
+                                            edited(text) => { root.mu_long_term = text.to-float(); }
+                                        } 
+                                    }
+                                    Row { 
+                                        Text { text: "Volatility (σ):"; }
+                                        LineEdit { 
+                                            text: root.sigma;
+                                            edited(text) => { root.sigma = text.to-float(); }
+                                        } 
+                                    }
+                                }
+                            }
+                            
+                            // GARCH parameters
+                            if root.model_type == "GARCH": VerticalBox {
+                                spacing: 5px;
+                                Text { text: "GARCH(1,1) Parameters:"; font-weight: 600; }
+                                GridBox {
+                                    Row { 
+                                        Text { text: "Omega (ω):"; }
+                                        LineEdit { 
+                                            text: root.omega;
+                                            edited(text) => { root.omega = text.to-float(); }
+                                        } 
+                                    }
+                                    Row { 
+                                        Text { text: "Alpha (α):"; }
+                                        LineEdit { 
+                                            text: root.alpha;
+                                            edited(text) => { root.alpha = text.to-float(); }
+                                        } 
+                                    }
+                                    Row { 
+                                        Text { text: "Beta (β):"; }
+                                        LineEdit { 
+                                            text: root.beta;
+                                            edited(text) => { root.beta = text.to-float(); }
+                                        } 
+                                    }
+                                }
+                                Text { 
+                                    text: "Constraint: α + β < 1"; 
+                                    font-size: 10px;
+                                    color: #888;
+                                }
                             }
                         }
                     }
@@ -158,12 +302,23 @@ export component AppWindow inherits Window {
                             use_antithetic: root.use_antithetic,
                             dt: 1,
                             model_type: root.model_type,
+                            // Mean Reversion params
+                            theta: root.theta,
+                            mu_long_term: root.mu_long_term,
+                            // Jump Diffusion params
+                            lambda: root.lambda,
+                            mu_j: root.mu_j,
+                            sigma_j: root.sigma_j,
+                            // GARCH params
+                            omega: root.omega,
+                            alpha: root.alpha,
+                            beta: root.beta,
                         });
-                        }
                     }
                 }
             }
         }
+     }
 
         VerticalBox { // Middle Panel
             min-width: 400px;
