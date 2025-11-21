@@ -6,7 +6,7 @@ use plotters_bitmap::BitMapBackend;
 const CHART_WIDTH: u32 = 800;
 const CHART_HEIGHT: u32 = 600;
 
-pub fn plot_price_paths(paths: &[Vec<f64>]) -> Result<(Vec<u8>, u32, u32)> {
+pub fn plot_price_paths(paths: &[Vec<f64>],  model_type: &str, mu_long_term: Option<f64>) -> Result<(Vec<u8>, u32, u32)> {
     let mut buf = vec![0; (CHART_WIDTH * CHART_HEIGHT * 3) as usize];
     let backend = BitMapBackend::<RGBPixel>::with_buffer_and_format(
         &mut buf, (CHART_WIDTH, CHART_HEIGHT))?;
@@ -59,6 +59,25 @@ pub fn plot_price_paths(paths: &[Vec<f64>]) -> Result<(Vec<u8>, u32, u32)> {
                 path.iter().enumerate().map(|(i, &p)| (i, p)),
                 &YELLOW.mix(0.3),
             ))?;
+        }
+        // Draw reference line for Mean Reversion model
+        if model_type == "MeanReversion" {
+        if let Some(mean_price) = mu_long_term {
+        // Draw horizontal line for long-term mean
+            chart.draw_series(LineSeries::new(
+                vec![(0, mean_price), (max_steps, mean_price)],
+                &RED.mix(0.8),
+            ))?
+                .label("Long-term Mean (μ)")
+                .legend(|(x, y)| PathElement::new(vec![(x, y), (x + 20, y)], &RED));
+            }
+        }
+        // Configure legend if reference line exists
+        if model_type == "MeanReversion" && mu_long_term.is_some() {
+            chart.configure_series_labels()
+                .background_style(&RGBColor(30, 30, 46).mix(0.8))
+                .border_style(&RGBColor(208, 208, 208))
+                .draw()?;
         }
     }
 

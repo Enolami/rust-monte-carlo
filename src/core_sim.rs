@@ -98,7 +98,17 @@ pub fn run_simulation (params: SimParams, hist_log_returns: Vec<f64>,) -> Result
     let mut terminal_prices: Vec<f64> = paths.iter().map(|path| *path.last().unwrap()).collect();
     let stats = calculate_statistics(&mut terminal_prices, model_name,num_paths, horizon, init_price)?;
 
-    let paths_png = crate::plotting::plot_price_paths(&paths)?;
+    let mu_long_term_value = if params.model_type == "MeanReversion" {
+        Some(params.mu_long_term as f64)
+    } else {
+        None
+    };
+
+    let paths_png = crate::plotting::plot_price_paths(
+        &paths,
+        &params.model_type,
+        mu_long_term_value,
+    )?;
     let hist_png = crate::plotting::plot_histogram(&terminal_prices, 100)?;
 
     Ok((stats, paths_png, hist_png))
