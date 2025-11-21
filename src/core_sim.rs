@@ -3,8 +3,9 @@ use rand::{rngs::StdRng, Rng, SeedableRng};
 use rand_distr::{Distribution, Normal};
 use rayon::prelude::*;
 use statrs::statistics::{Data, Distribution as StatDist, Median, OrderStatistics};
+use nalgebra::DVector;
 
-use crate::SimParams;
+use crate::{SimParams, porfolio::PortfolioConfig};
 
 #[derive(Debug, Clone)]
 pub struct SimStats {
@@ -50,6 +51,54 @@ pub fn run_simulation (params: SimParams, hist_log_returns: Vec<f64>,) -> Result
 
     let paths_png = crate::plotting::plot_price_paths(&paths)?;
     let hist_png = crate::plotting::plot_histogram(&terminal_prices, 100)?;
+
+    Ok((stats, paths_png, hist_png))
+}
+
+pub fn run_portfolio_simulation(params: SimParams, config: PortfolioConfig) -> Result<(SimStats, (Vec<u8>, u32, u32), (Vec<u8>, u32,u32))> {
+    let horizon = params.horizon as usize;
+    let num_paths = params.num_paths as usize;
+    let dt = params.dt as f64;
+    let num_assets = config.assets.len();
+
+    let paths: Vec<Vec<f64>> = (0..num_paths).into_par_iter().map(|i| {
+        let seed = (params.seed as u64).wrapping_add(i as u64);
+        let mut rng = StdRng::seed_from_u64(seed);
+        let normal = Normal::new(0.0, 1.0).unwrap();
+
+        let mut current_asset_prices: Vec<f64> = config.assets.iter().map(|a| a.last_price).collect();
+
+        let mut portfolio_path = Vec::with_capacity(horizon+1);
+        portfolio_path.push(config.init_value);
+
+        for _ in 0..horizon {
+            let z_independent: Vec<f64> = (0..num_assets).map(|_| normal.sample(&mut rng)).collect();
+            let z_vec = DVector::from_vec(z_independent);
+
+            let z_correlated = &config.cholesky_l * z_vec;
+
+            let mut current_portfolio_val = 0.0;
+
+            for j in 0..num_assets {
+                let asset = &config.assets[j];
+                let drift = (asset.mu - 0.5 * asset.sigma.powi(2)) * dt;
+                let diffusion = asset.sigma * dt.sqrt();
+                let shock = diffusion * z_correlated[j];
+
+                current_asset_prices[j] *= (drift + shock).exp();
+
+                current_portfolio_val += current_asset_prices[j] * asset.shares;
+            }
+            portfolio_path.push(current_portfolio_val);
+        }
+        portfolio_path
+    }).collect();
+
+    let mut terminal_values: Vec<f64> = paths.iter().map(|p| *p.last().unwrap()).collect();
+    let stats = calculate_statistics(&mut terminal_values, "Portfolio GBM", num_paths, horizon, config.init_value)?;
+
+    let paths_png = crate::plotting::plot_price_paths(&paths)?;
+    let hist_png = crate::plotting::plot_histogram(&terminal_values, 100)?;
 
     Ok((stats, paths_png, hist_png))
 }

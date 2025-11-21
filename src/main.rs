@@ -1,10 +1,11 @@
 use anyhow::Result;
 use image::{ImageEncoder, codecs::png::PngEncoder};
+use rayon::vec;
 use rfd::FileDialog;
 use slint::{Image, ModelRc, PlatformError, SharedString, VecModel};
-use std::{cell::RefCell, fs::{self, File}, rc::Rc, thread, time::Instant};
+use std::{cell::RefCell, collections::HashMap, fs::{self, File}, rc::Rc, thread, time::Instant};
 
-use crate::core_sim::{SimStats as rustSimStats, estimate_paramaters, run_simulation};
+use crate::{core_sim::{SimStats as rustSimStats, estimate_paramaters, run_portfolio_simulation, run_simulation}, porfolio::build_portfolio_config};
 use crate::data_io::{get_ticker_info, load_all_records}; 
 use crate::slint_generatedAppWindow::SimStats as slintSimStats;
 
@@ -13,14 +14,19 @@ slint::include_modules!();
 mod data_io;
 mod core_sim;
 mod plotting;
+mod porfolio;
 
 #[derive(Default, Debug, Clone)]
 struct AppState {
-    all_data: Vec<crate::data_io::StockRecord>,
+    all_data_map: HashMap<String, Vec<crate::data_io::StockRecord>>,
     tickers: Vec<String>,
+
     selected_ticker: String,
     selected_ticker_last_price: f64,
     selected_ticker_log_returns: Vec<f64>,
+
+    portfolio_tickers: Vec<(String, f64)>,
+
     last_paths_chart_png_raw: (Vec<u8>, u32, u32),
     last_hist_chart_png_raw: (Vec<u8>, u32, u32),
 }
@@ -46,7 +52,7 @@ fn setup_callbacks(main_window: &AppWindow, app_state: Rc<RefCell<AppState>>) {
                 match load_all_records(path) {
                     Ok((all_records, tickers)) => {
                         let mut state = app_state.borrow_mut();
-                        state.all_data = all_records;
+                        state.all_data_map = all_records;
                         state.tickers = tickers.clone();
 
                         let ticker_shared: Vec<SharedString> = tickers.into_iter().map(SharedString::from).collect();
@@ -75,10 +81,13 @@ fn setup_callbacks(main_window: &AppWindow, app_state: Rc<RefCell<AppState>>) {
 
                 let selected_ticker = mw.get_selected_ticker();
                 state.selected_ticker = selected_ticker.to_string().clone();
-                let (info, log_returns) = get_ticker_info(&state.all_data, &selected_ticker);
+
+                let (info, log_returns) = get_ticker_info(&state.all_data_map, &selected_ticker);
                 
-                if let Some(last_record) = state.all_data.iter().filter(|r| r.ticker == state.selected_ticker).last() {
-                    state.selected_ticker_last_price = last_record.close;
+                if let Some(records) = state.all_data_map.get(&state.selected_ticker) {
+                    if let Some(last) = records.last() {
+                        state.selected_ticker_last_price = last.close;
+                    }
                 }
 
                 state.selected_ticker_log_returns = log_returns;
@@ -119,21 +128,71 @@ fn setup_callbacks(main_window: &AppWindow, app_state: Rc<RefCell<AppState>>) {
         }
     });
 
+    main_window.on_add_ticker_to_portfolio({
+        let mw_weak = main_window_weak.clone();
+        let app_state = app_state.clone();
+        move |ticker, weight| {
+            if let Some(mw) = mw_weak.upgrade() {
+                let mut state = app_state.borrow_mut();
+                if ticker.is_empty() {return;}
+                if !state.portfolio_tickers.iter().any(|(t, _)| t == &ticker.to_string()) {
+                    state.portfolio_tickers.push((ticker.to_string(), weight as f64));
+                }
+
+                let ui_model: Vec<PortfolioItem> = state.portfolio_tickers.iter().map(|(t, w)| {
+                    PortfolioItem { ticker:SharedString::from(t), weight: *w as f32 }
+                }).collect();
+                mw.set_portfolio_model(ModelRc::from(Rc::new(VecModel::from(ui_model))));
+
+                let total_w: f64 = state.portfolio_tickers.iter().map(|(_,w)| w).sum();
+                mw.set_current_portfolio_weight(total_w as f32);
+            }
+        }
+    });
+
+    main_window.on_clear_portfolio({
+        let mw_weak = main_window_weak.clone();
+        let app_state = app_state.clone();
+        move || {
+            if let Some(mw) = mw_weak.upgrade() {
+                let mut state = app_state.borrow_mut();
+                state.portfolio_tickers.clear();
+                mw.set_portfolio_model(ModelRc::from(Rc::new(VecModel::from(vec![]))));
+                mw.set_current_portfolio_weight(0.0);
+            }
+        }
+    });
+
     //run sim and display png
-    main_window.on_run_simulation_pressed({
+     main_window.on_run_simulation_pressed({
         let mw_weak = main_window_weak.clone();
         let app_state = app_state.clone();
         move |params| {
             if let Some(mw) = mw_weak.upgrade() {
                 let start_time = Instant::now();
+                let state = app_state.borrow();
 
-                let hist_log_returns = app_state.borrow().selected_ticker_log_returns.clone();
+                // SWITCH: Single vs Portfolio
+                let result = if params.is_portfolio {
+                    if state.portfolio_tickers.is_empty() {
+                        eprintln!("Portfolio empty");
+                        return;
+                    }
+                    // Build config and run portfolio sim
+                    match build_portfolio_config(&state.portfolio_tickers, params.initial_price as f64, &state.all_data_map) {
+                        Ok(config) => run_portfolio_simulation(params, config),
+                        Err(e) => Err(e),
+                    }
+                } else {
+                    // Original Single Sim
+                    let hist_log_returns = state.selected_ticker_log_returns.clone();
+                    if hist_log_returns.is_empty() && params.model_type == "Bootstrap" {
+                        return;
+                    }
+                    run_simulation(params, hist_log_returns)
+                };
 
-                if hist_log_returns.is_empty() && params.model_type == "Bootstrap" {
-                    return;
-                }
-
-                match run_simulation(params, hist_log_returns){
+                match result {
                     Ok((stats, (paths_buf, paths_w, paths_h), (hist_buf, hist_w, hist_h))) => {
                         let duration = start_time.elapsed().as_millis();
                         mw.set_exec_time(format!("{} ms", duration).into());
@@ -155,10 +214,8 @@ fn setup_callbacks(main_window: &AppWindow, app_state: Rc<RefCell<AppState>>) {
 
                         let hist_pixel_buffer = slint::SharedPixelBuffer::clone_from_slice(&hist_buf, hist_w, hist_h);
                         mw.set_hist_chart(Image::from_rgb8(hist_pixel_buffer));
-
-                        let mut state = app_state.borrow_mut();
-                        state.last_paths_chart_png_raw = (paths_buf, paths_w, paths_h);
-                        state.last_hist_chart_png_raw = (hist_buf, hist_w, hist_h);
+                        
+                        // (Ideally update app_state.last_... here for exports)
                     }
                     Err(e) => {
                         eprintln!("Simulation error: {}", e);

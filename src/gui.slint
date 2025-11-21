@@ -1,4 +1,5 @@
-import { Button, ComboBox, SpinBox, CheckBox, VerticalBox, HorizontalBox, GroupBox, GridBox, LineEdit, TabWidget } from "std-widgets.slint";
+import { Button, ComboBox, SpinBox, CheckBox, VerticalBox, HorizontalBox, GroupBox, GridBox, LineEdit, TabWidget, ListView, StandardTableView } from "std-widgets.slint";
+
 export enum SimModel {
     GBM,
     Bootstrap,
@@ -14,6 +15,7 @@ export struct SimParams {
     use_antithetic: bool,
     dt: int,
     model_type: string,
+    is_portfolio: bool, // New flag
 }
 
 export struct SimStats {
@@ -27,18 +29,22 @@ export struct SimStats {
     var95: float,
 }
 
+export struct PortfolioItem {
+    ticker: string,
+    weight: float,
+}
+
 export component AppWindow inherits Window {
     title: "Stock Monte Carlo Simulator";
-    preferred-width: 1050px;
-    preferred-height: 700px;
-    min-width: 960px;
-    min-height: 600px;
+    preferred-width: 1100px; // Widened slightly
+    preferred-height: 750px;
+    
     in-out property <[string]> ticker_list: [];
     in-out property <string> selected_ticker : "";
     in-out property <string> date_range: "Date range: N/A";
     in-out property <string> record_count: "Record count: 0";
 
-    in-out property <float>  initial_price: 150.0;
+    in-out property <float>  initial_price: 10000.0; // Default higher for portfolio
     in-out property <int> horizon: 30;
     in-out property <int> num_paths: 1000;
     in-out property <float> mu: 0.0002;
@@ -46,6 +52,12 @@ export component AppWindow inherits Window {
     in-out property <int> seed: 12345;
     in-out property <bool> use_antithetic: true;
     in-out property <string> model_type: "GBM";
+    
+    // NEW PORTFOLIO PROPERTIES
+    in-out property <bool> is_portfolio_mode: false;
+    in-out property <[PortfolioItem]> portfolio_model: [];
+    in-out property <float> current_portfolio_weight: 0.0;
+    in-out property <float> add_ticker_weight: 50.0;
 
     in property <SimStats> stats;
     in-out property <image> price_chart;
@@ -58,36 +70,100 @@ export component AppWindow inherits Window {
     callback run_simulation_pressed(SimParams);
     callback export_summary_pressed();
     callback export_charts_pressed(); 
+    
+    // NEW CALLBACKS
+    callback add_ticker_to_portfolio(string, float);
+    callback clear_portfolio();
 
     HorizontalBox {
         padding: 10px;
         spacing: 10px;
-        VerticalBox { // Left Panel
-            preferred-width: 300px;
-            min-width: 280px;
+        VerticalLayout { // Left Panel
+            preferred-width: 320px;
+            min-width: 300px;
             vertical-stretch: 1; 
+            
             GroupBox {
                 title: "Control Panel";
                 vertical-stretch: 1; 
                 VerticalBox {
                     spacing: 8px;
+                    
+                    // MODE SELECTOR
+                    HorizontalLayout {
+                        Text { text: "Mode: "; vertical-alignment: center; }
+                        ComboBox {
+                            model: ["Single Asset", "Portfolio"];
+                            current-value: "Single Asset";
+                            selected(val) => { 
+                                root.is_portfolio_mode = (val == "Portfolio");
+                            }
+                        }
+                    }
+
                     Text { text: "1. Data Input"; }
                     Button {
                         text: "Load CSV";
                         clicked => { load_csv_pressed(); } 
                     }
-                    ComboBox { 
-                        model: root.ticker_list;
-                        selected(current-value) => {root.selected_ticker = current-value; select_ticker_changed();}
+                    
+                    // SINGLE ASSET UI
+                    if (!root.is_portfolio_mode) : VerticalLayout {
+                        spacing: 5px;
+                        ComboBox { 
+                            model: root.ticker_list;
+                            selected(current-value) => {root.selected_ticker = current-value; select_ticker_changed();}
+                        }
+                        Text { text: root.date_range;}
+                        Text { text: root.record_count;}
+                        
+                        Button {
+                            text: "Estimate μ/σ from Data";
+                            enabled: root.selected_ticker != "";
+                            clicked => { estimate_params_pressed(); }
+                        }
                     }
-                    Text { text: root.date_range;}
-                    Text { text: root.record_count;}
 
-                    Text { text: "2. Parameter Estimation";}
-                    Button {
-                        text: "Estimate μ/σ from Data";
-                        enabled: root.selected_ticker != "";
-                        clicked => { estimate_params_pressed(); }
+                    // PORTFOLIO UI
+                    if (root.is_portfolio_mode) : VerticalLayout {
+                        spacing: 5px;
+                        Rectangle { 
+                            background: #2c2c2c; 
+                            border-radius: 4px;
+                            vertical-stretch: 0;
+                            height: 140px;
+                            
+                            VerticalLayout {
+                                Text { text: "Portfolio Composition"; font-weight: 700; }
+                                ListView {
+                                    for item in root.portfolio_model : HorizontalBox {
+                                        Text { text: item.ticker; width: 60px; }
+                                        Text { text: item.weight + "%"; }
+                                    }
+                                }
+                            }
+                        }
+                        Text { text: "Total Weight: " + root.current_portfolio_weight + "%"; color: root.current_portfolio_weight == 100.0 ? green : red; }
+                        
+                        HorizontalLayout {
+                            ComboBox { 
+                                width: 100px;
+                                model: root.ticker_list;
+                                selected(val) => { root.selected_ticker = val; }
+                            }
+                            SpinBox {
+                                value: 0;
+                                maximum: 100; 
+                                minimum: 0;
+                                step-size: 10;
+                                edited(value) => {root.add_ticker_weight = value;}
+                            }
+                            Button {
+                                text: "Add";
+                                clicked => { root.add_ticker_to_portfolio(root.selected_ticker, root.add_ticker_weight); }
+                            }
+                        }
+                        Button { text: "Clear Portfolio"; clicked => { root.clear_portfolio(); } }
                     }
 
                     Text { text: "3. Simulation Parameters";}
@@ -100,7 +176,7 @@ export component AppWindow inherits Window {
                             } 
                         }
                         Row { 
-                            Text { text: "Initial Price:";}
+                            Text { text: root.is_portfolio_mode ? "Total Capital:" : "Initial Price:";}
                             LineEdit { 
                                 text: root.initial_price;
                                 edited(text) => {root.initial_price = text.to-float();} 
@@ -119,26 +195,29 @@ export component AppWindow inherits Window {
                                 step-size: 100;
                             }
                         }
-                        Row { 
-                            Text { text: "Drift (μ) daily:";}
-                            LineEdit { 
-                                text : root.mu;
-                                edited(text) => {root.mu = text.to-float();}
-                            } 
-                        }
-                        Row {                  
-                            Text { text: "Volatility (σ) daily:";}
-                            LineEdit { 
-                                text : root.sigma;
-                                edited(text) => {root.sigma = text.to-float();} 
-                            } 
-                        }
                         Row {                 
                             Text { text: "Random Seed:";}
                             SpinBox {
                                 value <=> root.seed;
                                 maximum: 100000;
                             }
+                        }                        
+                        // Parameters manual override (Only if NOT portfolio mode)
+                        Row { 
+                            Text { visible: !root.is_portfolio_mode; text: "Drift (μ) daily:";}
+                            LineEdit { 
+                                visible: !root.is_portfolio_mode;
+                                text : root.mu;
+                                edited(text) => {root.mu = text.to-float();}
+                            } 
+                        }
+                        Row {                  
+                            Text { visible: !root.is_portfolio_mode; text: "Volatility (σ) daily:";}
+                            LineEdit { 
+                                visible: !root.is_portfolio_mode;
+                                text : root.sigma;
+                                edited(text) => {root.sigma = text.to-float();} 
+                            } 
                         }
                     }
                     CheckBox {
@@ -158,6 +237,7 @@ export component AppWindow inherits Window {
                             use_antithetic: root.use_antithetic,
                             dt: 1,
                             model_type: root.model_type,
+                            is_portfolio: root.is_portfolio_mode
                         });
                         }
                     }
@@ -179,7 +259,7 @@ export component AppWindow inherits Window {
                         VerticalBox {
                             spacing: 10px;
                             padding: 5px;
-                            Text { text: "Simulated Price Paths (50 Sample Scenarios)"; horizontal-alignment: center; }
+                            Text { text: "Simulated Paths (50 Sample Scenarios)"; horizontal-alignment: center; }
                             Image { 
                                 source <=> root.price_chart;
                                 image-fit: fill;
@@ -192,7 +272,7 @@ export component AppWindow inherits Window {
                         VerticalBox {
                             spacing: 10px;
                             padding: 5px;
-                            Text { text: "Histogram of Terminal Prices"; horizontal-alignment: center; }
+                            Text { text: "Distribution of Outcomes"; horizontal-alignment: center; }
                             Image { 
                                 source <=> root.hist_chart;
                                 image-fit: fill;

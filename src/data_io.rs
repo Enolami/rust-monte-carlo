@@ -1,7 +1,7 @@
 use anyhow::Result;
 use chrono::NaiveDate;
 use serde::{Deserialize};
-use std::{collections::BTreeMap, path::PathBuf};
+use std::{collections::{ HashMap}, path::PathBuf};
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct StockRecord {
@@ -30,32 +30,32 @@ where
     NaiveDate::parse_from_str(&s, "%Y%m%d").map_err(serde::de::Error::custom)
 }
 
-pub fn load_all_records(path: PathBuf) -> Result<(Vec<StockRecord>, Vec<String>)> {
+pub fn load_all_records(path: PathBuf) -> Result<(HashMap<String, Vec<StockRecord>>, Vec<String>)> {
     let mut reader = csv::Reader::from_path(path)?;
-    let mut records = Vec::new();
-    //use BtreeMap instead of Hashmap for better:
-    //Sorted data, lower memory usage, O(logn) as avg,
-    let mut tickers = BTreeMap::new();
+    let mut data_map: HashMap<String, Vec<StockRecord>> = HashMap::new();
 
     for result in reader.deserialize() {
         let record: StockRecord = result?;
-        tickers.insert(record.ticker.clone(), true);
-        records.push(record);
+        data_map.entry(record.ticker.clone()).or_insert_with(Vec::new).push(record);
     }
 
-    records.sort_by_key(|r| r.date);
+    let mut tickers = Vec::new();
+    for (ticker, records) in data_map.iter_mut() {
+        records.sort_by_key(|r| r.date);
+        tickers.push(ticker.clone());
+    }
 
-    let ticker_list = tickers.keys().cloned().collect();
-    Ok((records, ticker_list))
+    tickers.sort();
+
+    Ok((data_map,tickers))
 }
 
-pub fn get_ticker_info(all_data: &[StockRecord], ticker: &str) -> (String, Vec<f64>) {
-    let ticker_data: Vec<&StockRecord> = all_data.iter().filter(|r| r.ticker == ticker).collect();
+pub fn get_ticker_info(data_map: &HashMap<String, Vec<StockRecord>>, ticker: &str) -> (String, Vec<f64>) { 
+    let ticker_data = match data_map.get(ticker) {
+        Some(d) => d,
+        None => return ("No data for this ticker.".to_string(), Vec::new()),
+    };
     
-    if ticker_data.is_empty() {
-        return ("No data for this ticker.".to_string(), Vec::new());
-    }
-
     let start_date = ticker_data.first().unwrap().date;
     let end_date = ticker_data.last().unwrap().date;
     let count = ticker_data.len();
@@ -66,7 +66,7 @@ pub fn get_ticker_info(all_data: &[StockRecord], ticker: &str) -> (String, Vec<f
         let s1 = window[0].close;
         let s2 = window[1].close;
         if s1 > 0.0 && s2 > 0.0 {
-            log_returns.push((s2 / s1).ln());
+            log_returns.push((s2/s1).ln());
         }
     }
 

@@ -154,6 +154,7 @@ mod tests {
             use_antithetic: false,
             dt: 1,
             model_type: "GBM".to_string().into(),
+            is_portfolio: false,
         };
         
         let result1 = run_simulation(params.clone(), vec![]).unwrap();
